@@ -1,0 +1,95 @@
+name: statuspulse
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: statuspulse:local
+    container_name: statuspulse-app
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      REDIS_HOST: redis
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import json, urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); d=json.load(r); raise SystemExit(0 if d.get('status') == 'healthy' else 1)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 256m
+    memswap_limit: 256m
+    restart: unless-stopped
+    networks:
+      - statuspulse-net
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: statuspulse-postgres
+    env_file:
+      - .env
+    environment:
+      POSTGRES_DB: ${DB_NAME:-statuspulse}
+      POSTGRES_USER: ${DB_USER:-statuspulse}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change-me-local-only}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 512m
+    memswap_limit: 512m
+    restart: unless-stopped
+    networks:
+      - statuspulse-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: statuspulse-redis
+    env_file:
+      - .env
+    command:
+      [
+        "sh",
+        "-c",
+        "exec redis-server --appendonly yes $${REDIS_PASSWORD:+--requirepass $$REDIS_PASSWORD}",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "redis-cli $${REDIS_PASSWORD:+-a $$REDIS_PASSWORD} ping | grep PONG",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    mem_limit: 128m
+    memswap_limit: 128m
+    restart: unless-stopped
+    networks:
+      - statuspulse-net
+
+volumes:
+  postgres-data:
+
+networks:
+  statuspulse-net:
+    driver: bridge

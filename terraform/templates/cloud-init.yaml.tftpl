@@ -1,0 +1,130 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+  - gnupg
+  - jq
+  - openssl
+  - unattended-upgrades
+  - ufw
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/99-statuspulse-hardening.conf
+    owner: root:root
+    permissions: "0644"
+    content: |
+      Port ${ssh_port}
+      PermitRootLogin no
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      ChallengeResponseAuthentication no
+      PubkeyAuthentication yes
+      AllowUsers ubuntu ${deploy_user}
+
+  - path: /usr/local/bin/statuspulse-bootstrap
+    owner: root:root
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euxo pipefail
+
+      DEPLOY_USER="${deploy_user}"
+      REPOSITORY_URL="${repository_url}"
+      WRITE_APP_ENV="${write_app_env}"
+
+      if ! id "$DEPLOY_USER" >/dev/null 2>&1; then
+        useradd -m -s /bin/bash "$DEPLOY_USER"
+      fi
+
+      echo "$DEPLOY_USER ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/$DEPLOY_USER"
+      chmod 440 "/etc/sudoers.d/$DEPLOY_USER"
+
+      install -d -m 700 -o "$DEPLOY_USER" -g "$DEPLOY_USER" "/home/$DEPLOY_USER/.ssh"
+%{ if deploy_public_key != "" ~}
+      printf '%s\n' '${deploy_public_key}' > "/home/$DEPLOY_USER/.ssh/authorized_keys"
+%{ else ~}
+      if [ -f /home/ubuntu/.ssh/authorized_keys ]; then
+        cp /home/ubuntu/.ssh/authorized_keys "/home/$DEPLOY_USER/.ssh/authorized_keys"
+      fi
+%{ endif ~}
+      chown "$DEPLOY_USER:$DEPLOY_USER" "/home/$DEPLOY_USER/.ssh/authorized_keys" || true
+      chmod 600 "/home/$DEPLOY_USER/.ssh/authorized_keys" || true
+
+      if ! command -v docker >/dev/null 2>&1; then
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        chmod a+r /etc/apt/keyrings/docker.asc
+        . /etc/os-release
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list
+        apt-get update
+        apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      fi
+
+      usermod -aG docker "$DEPLOY_USER"
+      systemctl enable --now docker
+
+      if [ ! -f /swapfile ]; then
+        fallocate -l ${swap_size_gb}G /swapfile
+        chmod 600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile
+        echo "/swapfile none swap sw 0 0" >> /etc/fstab
+      fi
+
+      ufw default deny incoming
+      ufw default allow outgoing
+      ufw allow ${ssh_port}/tcp
+      ufw allow 80/tcp
+      ufw allow 443/tcp
+      ufw --force enable
+
+      dpkg-reconfigure -f noninteractive unattended-upgrades
+
+      install -d -m 0755 -o "$DEPLOY_USER" -g "$DEPLOY_USER" /opt/statuspulse
+      if [ -n "$REPOSITORY_URL" ] && [ ! -d /opt/statuspulse/.git ]; then
+        git clone --depth 1 "$REPOSITORY_URL" /opt/statuspulse
+        chown -R "$DEPLOY_USER:$DEPLOY_USER" /opt/statuspulse
+      fi
+
+      if [ "$WRITE_APP_ENV" = "true" ] && [ -d /opt/statuspulse ]; then
+        cat > /opt/statuspulse/.env <<'ENVEOF'
+      APP_PORT=8000
+      DB_HOST=postgres
+      DB_PORT=5432
+      DB_NAME=${db_name}
+      DB_USER=${db_user}
+      DB_PASSWORD=${db_password}
+      REDIS_HOST=redis
+      REDIS_PORT=6379
+      REDIS_PASSWORD=${redis_password}
+      DOMAIN=${domain_name}
+      STATUS_DOMAIN=${status_domain}
+      LETSENCRYPT_EMAIL=${letsencrypt_email}
+      GHCR_IMAGE=${ghcr_image}
+      HEALTH_URL=${health_url}
+      ALERT_WEBHOOK_URL=${alert_webhook_url}
+      ENVEOF
+        sed -i 's/^      //' /opt/statuspulse/.env
+        chown "$DEPLOY_USER:$DEPLOY_USER" /opt/statuspulse/.env
+        chmod 600 /opt/statuspulse/.env
+      fi
+
+      if [ -d /opt/statuspulse/scripts ]; then
+        cat > /etc/cron.d/statuspulse <<'CRONEOF'
+      SHELL=/bin/bash
+      PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      */5 * * * * root cd /opt/statuspulse && ./scripts/health-monitor.sh
+      0 2 * * * root cd /opt/statuspulse && ./scripts/backup.sh
+      17 3 * * * root cd /opt/statuspulse && docker compose -f docker-compose.prod.yml --profile certbot run --rm certbot renew --webroot -w /var/www/certbot && docker exec statuspulse-nginx nginx -s reload
+      CRONEOF
+        sed -i 's/^      //' /etc/cron.d/statuspulse
+        chmod 644 /etc/cron.d/statuspulse
+      fi
+
+      systemctl reload ssh || systemctl restart ssh
+
+runcmd:
+  - [bash, /usr/local/bin/statuspulse-bootstrap]

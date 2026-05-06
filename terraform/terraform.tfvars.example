@@ -1,0 +1,23 @@
+aws_region       = "us-east-1"
+project_name     = "statuspulse"
+instance_type    = "t2.micro"
+key_name         = "your-existing-ec2-keypair"
+ssh_port         = 2222
+allowed_ssh_cidr = "YOUR_PUBLIC_IP/32"
+
+repository_url = "https://github.com/YOUR_USERNAME/statuspulse.git"
+ghcr_image     = "ghcr.io/YOUR_USERNAME/statuspulse:latest"
+
+domain_name       = "statuspulse.example.com"
+status_domain     = "status.statuspulse.example.com"
+letsencrypt_email = "you@example.com"
+
+# Optional: only use this if you already have a Route 53 hosted zone.
+route53_zone_id = ""
+
+# Optional: writes /opt/statuspulse/.env during cloud-init.
+# These values are stored in Terraform state, so keep the state private.
+write_app_env     = false
+db_password       = "replace-with-a-strong-password"
+redis_password    = "replace-with-a-strong-password"
+alert_webhook_url = ""
