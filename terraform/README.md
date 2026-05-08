@@ -9,6 +9,47 @@ This Terraform creates the AWS side of the StatusPulse deployment:
 
 AWS public IPv4 and Route 53 can incur small charges depending on your account and region. Destroy the stack when you are done with the assessment.
 
+## Backend
+
+Terraform uses a local backend on your machine:
+
+```hcl
+backend "local" {
+  path = "state/statuspulse.tfstate"
+}
+```
+
+The `terraform/state/` directory is kept in the repo with `.gitkeep`, but `*.tfstate` files are ignored because they can contain sensitive infrastructure data.
+
+## Module Layout
+
+```text
+terraform/
+├── main.tf
+├── variables.tf
+├── outputs.tf
+├── terraform.tfvars.example
+└── modules/
+    ├── networking/
+    │   ├── main.tf
+    │   ├── variables.tf
+    │   └── outputs.tf
+    ├── compute/
+    │   ├── main.tf
+    │   ├── variables.tf
+    │   ├── outputs.tf
+    │   └── templates/cloud-init.yaml.tftpl
+    └── dns/
+        ├── main.tf
+        ├── variables.tf
+        └── outputs.tf
+```
+
+- `networking` discovers the default VPC/subnets and creates the StatusPulse security group.
+- `compute` launches the Ubuntu EC2 instance and renders cloud-init server bootstrap.
+- `dns` optionally creates Route 53 `A` records when `route53_zone_id` is provided.
+- Root `main.tf` wires the modules together and keeps shared project inputs in one place.
+
 ## Usage
 
 1. Create an EC2 key pair in AWS.
@@ -25,6 +66,17 @@ cp terraform.tfvars.example terraform.tfvars
 - Set `repository_url` after you push this repo to GitHub.
 - Set `domain_name` and `status_domain`.
 - Leave `route53_zone_id` empty if you use DuckDNS, Cloudflare, or `sslip.io`.
+- Leave `instance_type` empty to auto-select a Free Tier eligible x86_64 instance type in your AWS region.
+
+To see eligible instance types yourself:
+
+```bash
+aws ec2 describe-instance-types \
+  --region us-east-1 \
+  --filters "Name=free-tier-eligible,Values=true" \
+  --query "InstanceTypes[].InstanceType" \
+  --output table
+```
 
 4. Apply:
 

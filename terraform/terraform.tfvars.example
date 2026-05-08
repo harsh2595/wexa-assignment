@@ -1,6 +1,8 @@
 aws_region       = "us-east-1"
 project_name     = "statuspulse"
-instance_type    = "t2.micro"
+# Leave empty to auto-select a Free Tier eligible x86_64 type in this region.
+# If you must override manually, use the AWS CLI command in terraform/README.md first.
+instance_type    = ""
 key_name         = "your-existing-ec2-keypair"
 ssh_port         = 2222
 allowed_ssh_cidr = "YOUR_PUBLIC_IP/32"

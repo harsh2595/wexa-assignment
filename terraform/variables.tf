@@ -17,9 +17,9 @@ variable "ami_id" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type. t2.micro is commonly used for AWS Free Tier style demos."
+  description = "Optional EC2 instance type override. Empty auto-selects a Free Tier eligible x86_64 type in the selected region."
   type        = string
-  default     = "t2.micro"
+  default     = ""
 }
 
 variable "key_name" {
