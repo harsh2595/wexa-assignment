@@ -1,10 +1,11 @@
+import json
+import os
+from datetime import UTC, datetime
+
+import psycopg2
+import redis
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from datetime import datetime, timezone
-import os
-import redis
-import psycopg2
-import json
 
 app = FastAPI(title="StatusPulse", version="1.0.0")
 
@@ -89,7 +90,7 @@ def health_check():
     return {
         "status": overall,
         "checks": checks,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -112,7 +113,7 @@ def add_service(service: ServiceCreate):
         return {"id": service_id, "name": service.name, "url": service.url}
     except psycopg2.errors.UniqueViolation:
         conn.rollback()
-        raise HTTPException(status_code=409, detail="Service already exists")
+        raise HTTPException(status_code=409, detail="Service already exists") from None
     finally:
         cur.close()
         conn.close()
