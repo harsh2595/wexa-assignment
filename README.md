@@ -27,7 +27,7 @@ flowchart LR
 - `make`, `curl`, and Python 3 for local testing
 - GitHub public repository
 - AWS account, EC2 key pair, and AWS credentials for Terraform
-- Domain or subdomain pointing to the EC2 public IP
+- Domain or subdomain pointing to the EC2 public IP, or `sslip.io` for a no-DNS demo
 - Optional Route 53 hosted zone if you want Terraform to create DNS records
 
 AWS public IPv4 and Route 53 can incur small charges depending on your account. Destroy the AWS stack after assessment if you do not need it.
@@ -93,6 +93,12 @@ APP_HEALTH_URL=https://statuspulse.example.com/health
 DISCORD_WEBHOOK_URL=<optional>
 ```
 
+GitHub-hosted runners connect from GitHub-controlled public IPs. For automated
+deployments, the EC2 security group must allow the runner to reach the custom SSH
+port. For a short assessment demo, set `allowed_ssh_cidr = "0.0.0.0/0"` in
+`terraform/terraform.tfvars`, apply Terraform, rerun Deploy, then lock SSH back
+down to your own `/32` public IP after proof is captured.
+
 ## AWS Deployment
 
 1. Push this repo to a public GitHub repository.
@@ -112,7 +118,13 @@ terraform init
 terraform apply
 ```
 
-4. Point `DOMAIN` and `STATUS_DOMAIN` to the EC2 public IP. If using Route 53, set `route53_zone_id` in `terraform.tfvars`.
+4. Point `DOMAIN` and `STATUS_DOMAIN` to the EC2 public IP. If using Route 53, set `route53_zone_id` in `terraform.tfvars`. For a quick demo without buying DNS, use `sslip.io` names after Terraform prints the public IP:
+
+```text
+DOMAIN=<instance_public_ip>.sslip.io
+STATUS_DOMAIN=status.<instance_public_ip>.sslip.io
+HEALTH_URL=https://<instance_public_ip>.sslip.io/health
+```
 
 5. SSH to the instance:
 
@@ -121,6 +133,26 @@ ssh -p 2222 deploy@<instance_public_ip>
 ```
 
 6. On the server, create `/opt/statuspulse/.env` from `.env.example` if Terraform did not write it. Set strong values for `DB_PASSWORD`, `REDIS_PASSWORD`, `DOMAIN`, `STATUS_DOMAIN`, `LETSENCRYPT_EMAIL`, `GHCR_IMAGE`, and `HEALTH_URL`.
+
+Example production `.env` values using `sslip.io`:
+
+```text
+APP_PORT=8000
+DB_HOST=postgres
+DB_PORT=5432
+DB_NAME=statuspulse
+DB_USER=statuspulse
+DB_PASSWORD=<strong-random-password>
+REDIS_HOST=redis
+REDIS_PORT=6379
+REDIS_PASSWORD=<strong-random-password>
+DOMAIN=<instance_public_ip>.sslip.io
+STATUS_DOMAIN=status.<instance_public_ip>.sslip.io
+LETSENCRYPT_EMAIL=<your-email>
+GHCR_IMAGE=ghcr.io/<github-user>/<repo>:latest
+HEALTH_URL=https://<instance_public_ip>.sslip.io/health
+ALERT_WEBHOOK_URL=<optional>
+```
 
 7. Bootstrap TLS after DNS resolves:
 
@@ -138,6 +170,10 @@ sudo APP_IMAGE=ghcr.io/YOUR_USERNAME/statuspulse:latest ./scripts/deploy.sh
 
 The deploy script starts the inactive blue/green app container, checks `/health`, switches Nginx upstream, runs an external health check, and rolls back if the new image fails.
 
+If the first deploy fails immediately after starting Nginx with a temporary
+`curl: (7) Failed to connect ... port 443` error, rerun `scripts/deploy.sh`.
+This can happen on the initial bootstrap when Nginx is still binding HTTPS.
+
 ## Monitoring And Alerting
 
 Uptime Kuma is available at:
@@ -149,11 +185,17 @@ https://status.<your-domain>/
 Configure these monitors in the Uptime Kuma UI:
 
 - HTTP monitor: `https://<your-domain>/health`, every 60 seconds
+- HTTP monitor: `https://<your-domain>/docs`, every 60 seconds
 - TCP monitor: host `postgres`, port `5432`
 - TCP monitor: host `redis`, port `6379`
 - TLS certificate monitor: `<your-domain>`
 
 Create a public status page in Uptime Kuma and add at least two notification channels, such as Discord and Ntfy.sh.
+
+For an `sslip.io` deployment, Uptime Kuma is available at
+`https://status.<instance_public_ip>.sslip.io/`. A public status page slug such
+as `statuspulse` will be available at
+`https://status.<instance_public_ip>.sslip.io/status/statuspulse`.
 
 The server cron health monitor runs `scripts/health-monitor.sh` every 5 minutes. It checks API health, disk usage, memory usage, expected Docker containers, and TLS expiry. Alerts go to `ALERT_WEBHOOK_URL`.
 
@@ -208,6 +250,8 @@ See [SECURITY.md](SECURITY.md) for scan and hardening details.
 - App is unhealthy: check `docker compose logs app postgres redis`.
 - Redis health check fails: make sure `REDIS_PASSWORD` matches in `.env`.
 - TLS bootstrap fails: confirm DNS points to the EC2 public IP and port 80 is reachable.
+- GitHub Actions Deploy fails with `dial tcp ... i/o timeout`: the runner cannot reach SSH. Open the EC2 security group for port `2222` to the runner source, or temporarily set `allowed_ssh_cidr = "0.0.0.0/0"` and rerun Terraform.
+- GHCR pull fails with `denied`: make the GHCR package public, or run `docker login ghcr.io -u <github-user>` on the EC2 host using a token with `read:packages`.
 - Deploy rolls back: inspect `/opt/statuspulse/deploy.log` and `docker logs statuspulse-app-blue` or `statuspulse-app-green`.
 - Uptime Kuma cannot reach Postgres or Redis: use Docker service names `postgres` and `redis`, not localhost.
 
