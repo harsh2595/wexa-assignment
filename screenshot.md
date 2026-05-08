@@ -18,6 +18,7 @@ gallery is available at [screenshots/screenshot.md](screenshots/screenshot.md).
 | CI pipeline | [Pipeline build successfully](<screenshots/pipeline build successfully.png>) |
 | Deploy pipeline | [Deployment pipeline ran successfully](<screenshots/deployment pipeline runned successfully.png>) |
 | CI/CD automation | [Deployment started after CI](<screenshots/deployment started automatically after ci pipeline finished.png>) |
+| GitHub repository secrets | [Repo secrets](<screenshots/repo secrets.png>) |
 | Uptime Kuma monitoring | [Monitoring dashboard](<screenshots/added monitoring on uptime kuma.png>) |
 | Public status page | [Status page services](<screenshots/all service attached on status page.png>) |
 
@@ -74,6 +75,8 @@ gallery is available at [screenshots/screenshot.md](screenshots/screenshot.md).
 ![Deployment started automatically after CI pipeline finished](<screenshots/deployment started automatically after ci pipeline finished.png>)
 
 ![CI/CD pipelines](<screenshots/pipelines-ci-cd.png>)
+
+![GitHub repository secrets](<screenshots/repo secrets.png>)
 
 ### Monitoring Proof
 
